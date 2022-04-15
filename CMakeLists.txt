@@ -15,4 +15,8 @@ if(OPENAPI_BuildExamples)
     include(CXXModules)
 
     add_subdirectory(example)
+
+    if(MSVC)
+        add_subdirectory(msvc-example)
+    endif()
 endif(OPENAPI_BuildExamples)
