@@ -43,11 +43,12 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         set(CXX_MODULES_OUTPUT_FLAG /module:output)
     else()
         set(CXX_MODULES_CHECK /experimental:module)
-        set(CXX_MODULES_FLAGS /experimental:module /interface)
+        set(CXX_MODULES_FLAGS /experimental:module /interface /std:c++latest)
         set(CXX_MODULES_EXT ifc)
         set(CXX_MODULES_CREATE_FLAGS -c)
         set(CXX_MODULES_USE_FLAG /reference)
         set(CXX_MODULES_OUTPUT_FLAG /ifcOutput)
+        set(CXX_MODULES_INCLUDE_FLAGS /I)
     endif()
 else ()
     message(FATAL_ERROR "Unsupported compiler")
@@ -85,7 +86,17 @@ function (target_enable_cxx_modules TARGET)
     _check_cxx_modules_support()
 
     # Add modules flag
-    target_compile_options(${TARGET} PRIVATE ${CXX_MODULES_FLAGS})
+    target_compile_options(${TARGET} PRIVATE 
+        ${CXX_MODULES_FLAGS}
+        # PRIVATE -MD # cannot added it like this because Clang errors out, unknown why
+        # PRIVATE -MT
+    )
+
+    # Add compile definitions
+    # needed for clang since the module target file needs the same flag for regular compilation.
+    # target_compile_definitions(${TARGET} PRIVATE 
+    #     $<$<CXX_COMPILER_ID:Clang>:_DEBUG _MT _DLL>
+    # )
 endfunction ()
 
 # ########################################################################## #
@@ -146,17 +157,40 @@ function (add_module_library TARGET)
 
     # Create targets for interface files
     foreach (_source ${_sources})
-        set(_o_file ${_source}.${CXX_MODULES_EXT})
-        set(_i_file ${CMAKE_CURRENT_SOURCE_DIR}/${_source})
+        get_filename_component(_source_absolute ${_source} ABSOLUTE)
+        get_filename_component(_source_name ${_source} NAME)
+
+        # NOTE: out file name in the bin dir may collide if the source is from out of tree.
+        # target name may also collide. So add a short hash (7 chars just like git hash) to mangle the name.
+        # absolute source name maybe too long, relative path too.
+        string(MD5 _source_hash ${_source_absolute})
+        string(REGEX MATCH "^......." _source_hash_7 ${_source_hash})
+
+        set(_o_file ${CMAKE_CURRENT_BINARY_DIR}/${_source_name}.${_source_hash_7}.${CXX_MODULES_EXT}) 
+        set(_i_file ${_source_absolute})
+        set(_o_file_target mod.${_source_name}.${_source_hash_7}.${CXX_MODULES_EXT})
+        #set(_i_file ${CMAKE_CURRENT_SOURCE_DIR}/${_source})
+        # message(STATUS "DEBUG ${_source_name} hash: ${_source_hash_7}")
 
         # TODO: CXX flags might be different
-        set(_cmd ${CMAKE_CXX_COMPILER} "$<JOIN:$<TARGET_PROPERTY:${TARGET},COMPILE_OPTIONS>,\t>" ${CXX_MODULES_CREATE_FLAGS} ${_i_file} ${CXX_MODULES_OUTPUT_FLAG} ${_o_file})
-
-        get_filename_component(_o_file_dir ${_o_file} DIRECTORY)
-
-        if (_o_file_dir)
-            file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${_o_file_dir})
+        set(_inc_prop "$<TARGET_PROPERTY:${TARGET},INCLUDE_DIRECTORIES>") # helper variable
+        
+        # hack
+        if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+            set(_conf_prop -D_DEBUG -D_MT -D_DLL -MD -MT)
         endif()
+      
+        #set(_comp_def_prop "$<TARGET_PROPERTY:${TARGET},COMPILE_DEFINITIONS>")
+        #set(_comp_def_prop_expand "$<$<BOOL:${_comp_def_prop}>:-D$<JOIN:${_comp_def_prop}, -D>>")
+
+        set(_cmd ${CMAKE_CXX_COMPILER} "$<JOIN:$<TARGET_PROPERTY:${TARGET},COMPILE_OPTIONS>,\t>" "$<$<BOOL:${_inc_prop}>:${CXX_MODULES_INCLUDE_FLAGS}$<JOIN:${_inc_prop}, ${CXX_MODULES_INCLUDE_FLAGS}>>" ${_conf_prop} ${CXX_MODULES_CREATE_FLAGS} ${_i_file} ${CXX_MODULES_OUTPUT_FLAG} ${_o_file})
+        # set(_cmd ${CMAKE_CXX_COMPILER} "$<JOIN:$<TARGET_PROPERTY:${TARGET},COMPILE_OPTIONS>,\t>" ${CXX_MODULES_CREATE_FLAGS} ${_i_file} ${CXX_MODULES_OUTPUT_FLAG} ${_o_file})
+
+        # get_filename_component(_o_file_dir ${_o_file} DIRECTORY)
+
+        # if (_o_file_dir)
+        #     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${_o_file_dir})
+        # endif()
 
         # Create interface build target
         add_custom_command(
@@ -167,12 +201,17 @@ function (add_module_library TARGET)
         )
 
         # Replace directory separators with something else
-        string(REPLACE "/" "__" _o_file_target ${_o_file})
-        string(PREPEND _o_file_target "module_")
+        # string(REPLACE "/" "__" _o_file_target ${_o_file})
+        # windows drive
+        # some module file path is too long. We use hash instead??
+        # string(MD5 _o_file_target ${_o_file_target})
+        # string(REPLACE ":" "__" _o_file_target ${_o_file_target})
+        # string(PREPEND _o_file_target "module_")
 
+        # Note: one target per file is maybe inefficient. cmake should support add ifc file dep natively.
         # Create interface build target
         add_custom_target(${_o_file_target}
-            COMMAND ${_cmd}
+            # COMMAND ${_cmd} # no need to have cmd here since this is a transient dependency?
             DEPENDS ${_o_file}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         )
@@ -223,7 +262,7 @@ function (target_link_module_libraries TARGET)
 
         foreach (_file ${_interface_files})
             # TODO: might be different on different compilers
-            target_compile_options(${TARGET} PRIVATE ${CXX_MODULES_USE_FLAG}${CMAKE_CURRENT_BINARY_DIR}/${_file})
+            target_compile_options(${TARGET} PRIVATE ${CXX_MODULES_USE_FLAG}${_file}) # interface file is always absolute
         endforeach ()
     endforeach ()
 
