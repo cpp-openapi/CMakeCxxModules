@@ -7,7 +7,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        BUILD_TYPE: ["Debug", "Release"]
+        BUILD_TYPE: ["Debug"] # Release has problem
         os: [ windows-latest ]
     steps:
     - uses: actions/checkout@v2

@@ -175,10 +175,8 @@ function (add_module_library TARGET)
         # TODO: CXX flags might be different
         set(_inc_prop "$<TARGET_PROPERTY:${TARGET},INCLUDE_DIRECTORIES>") # helper variable
         
-        # hack
-        if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-            set(_conf_prop -D_DEBUG -D_MT -D_DLL -MD -MT)
-        endif()
+        # hack. Only support Debug build
+        set(_conf_prop -D_DEBUG -D_MT -D_DLL -MD -MT)
       
         #set(_comp_def_prop "$<TARGET_PROPERTY:${TARGET},COMPILE_DEFINITIONS>")
         #set(_comp_def_prop_expand "$<$<BOOL:${_comp_def_prop}>:-D$<JOIN:${_comp_def_prop}, -D>>")
